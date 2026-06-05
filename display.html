@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>即時文字雲</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/wordcloud2.js/1.2.2/wordcloud2.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #0f0c29;
+      background: linear-gradient(135deg, #0f0c29, #302b63, #24243e);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      font-family: 'Segoe UI', Arial, sans-serif;
+      overflow: hidden;
+    }
+
+    .header {
+      position: fixed;
+      top: 0; left: 0; right: 0;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 16px 28px;
+      background: rgba(255,255,255,0.05);
+      backdrop-filter: blur(10px);
+      border-bottom: 1px solid rgba(255,255,255,0.1);
+      z-index: 10;
+    }
+
+    .header h1 {
+      color: white;
+      font-size: 1.3rem;
+      font-weight: 700;
+    }
+
+    .badge {
+      background: linear-gradient(135deg, #667eea, #764ba2);
+      color: white;
+      padding: 6px 16px;
+      border-radius: 20px;
+      font-size: 0.9rem;
+      font-weight: 600;
+    }
+
+    #canvas-container {
+      width: 100vw;
+      height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    canvas {
+      max-width: 100%;
+      max-height: 100%;
+    }
+
+    .empty-state {
+      text-align: center;
+      color: rgba(255,255,255,0.5);
+    }
+
+    .empty-state .icon { font-size: 64px; margin-bottom: 16px; }
+    .empty-state p { font-size: 1.2rem; }
+    .empty-state small { font-size: 0.9rem; opacity: 0.7; display: block; margin-top: 8px; }
+
+    .pulse {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      width: 10px;
+      height: 10px;
+      background: #68d391;
+      border-radius: 50%;
+      animation: pulse 2s infinite;
+    }
+
+    @keyframes pulse {
+      0% { box-shadow: 0 0 0 0 rgba(104, 211, 145, 0.7); }
+      70% { box-shadow: 0 0 0 10px rgba(104, 211, 145, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(104, 211, 145, 0); }
+    }
+
+    .footer {
+      position: fixed;
+      bottom: 0; left: 0; right: 0;
+      padding: 12px 28px;
+      background: rgba(255,255,255,0.03);
+      border-top: 1px solid rgba(255,255,255,0.08);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 20px;
+    }
+
+    .footer-item {
+      color: rgba(255,255,255,0.5);
+      font-size: 0.85rem;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .footer-item strong {
+      color: rgba(255,255,255,0.9);
+    }
+
+    #clearBtn {
+      background: rgba(255,100,100,0.2);
+      border: 1px solid rgba(255,100,100,0.4);
+      color: rgba(255,150,150,0.9);
+      padding: 6px 14px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 0.8rem;
+      transition: all 0.2s;
+    }
+
+    #clearBtn:hover {
+      background: rgba(255,100,100,0.35);
+    }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <h1>☁️ 即時文字雲</h1>
+    <div class="badge">🟢 <span id="countBadge">0</span> 筆關鍵字</div>
+  </div>
+
+  <div class="pulse"></div>
+
+  <div id="canvas-container">
+    <div class="empty-state" id="emptyState">
+      <div class="icon">💬</div>
+      <p>等待學生提交關鍵字…</p>
+      <small>關鍵字送出後會即時出現在這裡</small>
+    </div>
+    <canvas id="wordcloud-canvas"></canvas>
+  </div>
+
+  <div class="footer">
+    <div class="footer-item">📊 共 <strong id="uniqueCount">0</strong> 個不重複關鍵字</div>
+    <div class="footer-item">🔥 最熱門：<strong id="topWord">—</strong></div>
+    <button id="clearBtn" onclick="clearAllWords()">🗑️ 清除全部</button>
+  </div>
+
+  <script type="module">
+    import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
+    import { getFirestore, collection, onSnapshot, getDocs, deleteDoc } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyAuQVXT_vBZCqDSW70caliz0MTp0M_midU",
+      authDomain: "my-teaching-tools-402d3.firebaseapp.com",
+      projectId: "my-teaching-tools-402d3",
+      storageBucket: "my-teaching-tools-402d3.firebasestorage.app",
+      messagingSenderId: "705915240529",
+      appId: "1:705915240529:web:94d27ac5b91f4ba0097870"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+    const wordsRef = collection(db, 'wordcloud_words');
+
+    const canvas = document.getElementById('wordcloud-canvas');
+    const emptyState = document.getElementById('emptyState');
+    let renderTimer = null;
+
+    const COLORS = [
+      '#ff6b9d', '#c44dff', '#4d9fff', '#00d4aa',
+      '#ffaa00', '#ff6b6b', '#51cf66', '#74c0fc',
+      '#ffd43b', '#ff8787', '#a9e34b', '#66d9e8'
+    ];
+
+    function renderCloud(wordMap) {
+      const total = Object.values(wordMap).reduce((a, b) => a + b, 0);
+      const entries = Object.entries(wordMap).sort((a, b) => b[1] - a[1]);
+
+      // 更新統計
+      document.getElementById('countBadge').textContent = total;
+      document.getElementById('uniqueCount').textContent = entries.length;
+      document.getElementById('topWord').textContent = entries[0]?.[0] ?? '—';
+
+      if (entries.length === 0) {
+        emptyState.style.display = 'block';
+        canvas.style.display = 'none';
+        return;
+      }
+
+      emptyState.style.display = 'none';
+      canvas.style.display = 'block';
+
+      // 調整 canvas 尺寸
+      const W = window.innerWidth;
+      const H = window.innerHeight - 100;
+      canvas.width = W;
+      canvas.height = H;
+
+      const maxCount = entries[0][1];
+      const wordList = entries.map(([word, count], i) => {
+        const size = Math.round(28 + (count / maxCount) * 90);
+        return [word, size];
+      });
+
+      WordCloud(canvas, {
+        list: wordList,
+        gridSize: Math.round(8 * W / 1024),
+        weightFactor: 1,
+        fontFamily: '"Segoe UI", "Microsoft JhengHei", Arial, sans-serif',
+        color: () => COLORS[Math.floor(Math.random() * COLORS.length)],
+        rotateRatio: 0.3,
+        rotationSteps: 2,
+        backgroundColor: 'transparent',
+        drawOutOfBound: false,
+        shrinkToFit: true,
+        minSize: 12,
+      });
+    }
+
+    // 即時監聽
+    onSnapshot(wordsRef, (snapshot) => {
+      const wordMap = {};
+      snapshot.forEach(doc => {
+        const w = (doc.data().word || '').trim().toLowerCase();
+        if (w) wordMap[w] = (wordMap[w] || 0) + 1;
+      });
+
+      clearTimeout(renderTimer);
+      renderTimer = setTimeout(() => renderCloud(wordMap), 300);
+    });
+
+    // 清除全部
+    window.clearAllWords = async function() {
+      if (!confirm('確定要清除所有關鍵字嗎？')) return;
+      const snapshot = await getDocs(wordsRef);
+      const deletes = snapshot.docs.map(doc => deleteDoc(doc.ref));
+      await Promise.all(deletes);
+    };
+
+    // 視窗大小改變時重新渲染
+    let resizeTimer;
+    window.addEventListener('resize', () => {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(() => {
+        // 觸發重新渲染（onSnapshot 快取）
+        const event = new Event('resize-done');
+        window.dispatchEvent(event);
+      }, 400);
+    });
+  </script>
+</body>
+</html>

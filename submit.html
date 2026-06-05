@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>關鍵字提交</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+
+    .card {
+      background: white;
+      border-radius: 24px;
+      padding: 40px 32px;
+      width: 100%;
+      max-width: 440px;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.2);
+      text-align: center;
+    }
+
+    .emoji { font-size: 52px; margin-bottom: 12px; }
+
+    h1 {
+      font-size: 1.6rem;
+      color: #2d3748;
+      margin-bottom: 8px;
+      font-weight: 700;
+    }
+
+    .subtitle {
+      color: #718096;
+      font-size: 0.95rem;
+      margin-bottom: 32px;
+    }
+
+    input[type="text"] {
+      width: 100%;
+      padding: 16px 20px;
+      font-size: 1.1rem;
+      border: 2px solid #e2e8f0;
+      border-radius: 12px;
+      outline: none;
+      transition: border-color 0.2s;
+      color: #2d3748;
+      margin-bottom: 16px;
+    }
+
+    input[type="text"]:focus {
+      border-color: #667eea;
+    }
+
+    input[type="text"]::placeholder {
+      color: #a0aec0;
+    }
+
+    button {
+      width: 100%;
+      padding: 16px;
+      font-size: 1.1rem;
+      font-weight: 700;
+      background: linear-gradient(135deg, #667eea, #764ba2);
+      color: white;
+      border: none;
+      border-radius: 12px;
+      cursor: pointer;
+      transition: opacity 0.2s, transform 0.1s;
+    }
+
+    button:hover { opacity: 0.9; }
+    button:active { transform: scale(0.98); }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .success {
+      display: none;
+      margin-top: 20px;
+      padding: 16px;
+      background: #f0fff4;
+      border: 2px solid #9ae6b4;
+      border-radius: 12px;
+      color: #276749;
+      font-size: 1rem;
+      font-weight: 600;
+    }
+
+    .success.show { display: block; animation: fadeIn 0.4s ease; }
+
+    .error {
+      display: none;
+      margin-top: 16px;
+      padding: 12px;
+      background: #fff5f5;
+      border: 2px solid #feb2b2;
+      border-radius: 12px;
+      color: #c53030;
+      font-size: 0.9rem;
+    }
+
+    .error.show { display: block; }
+
+    .counter {
+      margin-top: 24px;
+      padding: 12px;
+      background: #ebf8ff;
+      border-radius: 12px;
+      color: #2b6cb0;
+      font-size: 0.9rem;
+    }
+
+    .counter span {
+      font-size: 1.4rem;
+      font-weight: 700;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(-8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="emoji">💬</div>
+    <h1>分享你的關鍵字</h1>
+    <p class="subtitle">輸入一個關鍵字或短語，送出後會出現在文字雲上</p>
+
+    <input type="text" id="wordInput" placeholder="輸入你的關鍵字..." maxlength="20" autocomplete="off">
+    <button id="submitBtn" onclick="submitWord()">送出 ✨</button>
+
+    <div class="success" id="successMsg">✅ 送出成功！你的關鍵字已加入文字雲</div>
+    <div class="error" id="errorMsg">❌ 送出失敗，請稍後再試</div>
+
+    <div class="counter" id="counter" style="display:none">
+      目前已有 <span id="totalCount">0</span> 筆關鍵字
+    </div>
+  </div>
+
+  <script type="module">
+    import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
+    import { getFirestore, collection, addDoc, onSnapshot, serverTimestamp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyAuQVXT_vBZCqDSW70caliz0MTp0M_midU",
+      authDomain: "my-teaching-tools-402d3.firebaseapp.com",
+      projectId: "my-teaching-tools-402d3",
+      storageBucket: "my-teaching-tools-402d3.firebasestorage.app",
+      messagingSenderId: "705915240529",
+      appId: "1:705915240529:web:94d27ac5b91f4ba0097870"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+    const wordsRef = collection(db, 'wordcloud_words');
+
+    // 即時顯示總數
+    onSnapshot(wordsRef, (snapshot) => {
+      const counter = document.getElementById('counter');
+      const totalCount = document.getElementById('totalCount');
+      counter.style.display = 'block';
+      totalCount.textContent = snapshot.size;
+    });
+
+    window.submitWord = async function() {
+      const input = document.getElementById('wordInput');
+      const word = input.value.trim();
+      const btn = document.getElementById('submitBtn');
+      const successMsg = document.getElementById('successMsg');
+      const errorMsg = document.getElementById('errorMsg');
+
+      if (!word) {
+        input.focus();
+        input.style.borderColor = '#fc8181';
+        setTimeout(() => input.style.borderColor = '#e2e8f0', 1500);
+        return;
+      }
+
+      successMsg.classList.remove('show');
+      errorMsg.classList.remove('show');
+      btn.disabled = true;
+      btn.textContent = '送出中…';
+
+      try {
+        await addDoc(wordsRef, {
+          word: word,
+          created_at: serverTimestamp()
+        });
+        input.value = '';
+        successMsg.classList.add('show');
+        setTimeout(() => successMsg.classList.remove('show'), 3000);
+      } catch (e) {
+        console.error(e);
+        errorMsg.classList.add('show');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = '送出 ✨';
+      }
+    };
+
+    // Enter 鍵送出
+    document.getElementById('wordInput').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') window.submitWord();
+    });
+  </script>
+</body>
+</html>
